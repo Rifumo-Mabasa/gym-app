@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="description" content="FitTrack Pro — Smart fitness tracking with 3D muscle heatmap, strength progression, and workout analytics.">
+    <title>FitTrack Pro</title>
+    <!-- FIX: Use Three.js r134 with reliable CDN path for OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Configure Supabase credentials here before loading app.js -->
+    <script>
+        // REQUIRED: Replace with your actual Supabase project credentials
+        window.__SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        window.__SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';
+    </script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="fittrack-app">
+<div class="container">
+    <nav class="control-panel">
+        <button class="toggle-btn active-nav" id="btn-home" onclick="showPage('home')">Dashboard</button>
+        <button class="toggle-btn" id="btn-creator" onclick="showPage('creator')">Create Program</button>
+        <button class="toggle-btn" id="btn-selector" onclick="showPage('selector')">My Programs</button>
+        <!-- FIX: Unit toggle is a separate action, not a nav page — no page id needed -->
+        <button class="toggle-btn" id="btn-guide" onclick="showPage('guide')">Exercise Guide</button>
+        <button class="toggle-btn" id="btn-progress" onclick="openProgressModal()">Progress</button>
+        <button class="toggle-btn" id="btn-quicklog" onclick="showPage('quicklog')">Quick Log</button>
+        <button class="toggle-btn" id="btn-units" onclick="toggleUnits()">
+            Units: <span id="unitLabel">kg</span>
+        </button>
+    </nav>
+    <nav class="auth-nav">
+        <img id="user-avatar" src="" alt="avatar" style="display:none;">
+        <span id="user-display" style="display:none;"></span>
+        <button id="login-btn" onclick="signInWithGoogle()">🔑 Sign In with Google</button>
+        <button id="logout-btn" style="display:none;" onclick="signOut()">Sign Out</button>
+    </nav>
+    <!-- Toast notification -->
+    <div id="toast"></div>
+    <!-- Loading spinner overlay -->
+    <div id="loading-spinner">
+        <div class="spinner-ring"></div>
+    </div>
+
+    <!-- DASHBOARD PAGE -->
+    <div id="page-home" class="page active">
+        <!-- Streak + Consistency -->
+        <div class="streak-bar">
+            <div>
+                <div class="streak-number" id="streakCount">0</div>
+                <div class="streak-label">🔥 Day Streak</div>
+            </div>
+            <div>
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;">Last 28 Days</div>
+                <div class="consistency-dots" id="consistencyDots"></div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:22px;font-weight:800;color:#fff;" id="monthWorkoutCount">0</div>
+                <div class="streak-label">Workouts this month</div>
+            </div>
+        </div>
+
+        <!-- Empty state shown to new users -->
+        <div id="dashEmptyState" style="display:none;text-align:center;background:var(--bg-secondary);border:1px dashed var(--border);border-radius:16px;padding:40px 20px;margin-bottom:20px;">
+            <div style="font-size:48px;margin-bottom:12px;">💪</div>
+            <h3 style="color:#fff;margin:0 0 8px;">No workouts logged yet!</h3>
+            <p style="color:var(--text-muted);margin:0 0 20px;font-size:14px;">Start your fitness journey — your progress will appear here after your first session.</p>
+            <button class="action-btn" onclick="showPage('selector')">Browse Programs →</button>
+            &nbsp;
+            <button class="action-btn" style="background:#475569;" onclick="showPage('quicklog')">Quick Log a Workout</button>
+        </div>
+
+        <h2 style="margin-top:0;">Weekly Volume Progression</h2>
+        <canvas id="weeklyProgressionChart" width="760" height="220"></canvas>
+
+        <div class="stats-container">
+            <div class="stat-card">
+                <h3>This Week</h3>
+                <p id="weeklyVolume">—</p>
+            </div>
+            <div class="stat-card">
+                <h3>All Time</h3>
+                <p id="totalVolume">—</p>
+            </div>
+
+            <div class="anatomy-panel">
+                <h3>3D Weekly Muscle Heatmap</h3>
+                <p style="font-size:13px;color:var(--text-muted);margin-top:-5px;margin-bottom:15px;">
+                    Drag to rotate · Red = high volume this week
+                </p>
+                <div id="anatomy-canvas-container"></div>
+                <div class="anatomy-legend" style="margin-top:10px;">
+                    <div class="legend-item"><div class="legend-color" style="background:#334155;"></div><span>Untrained</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#ca8a04;"></div><span>Moderate</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#ef4444;"></div><span>High Volume</span></div>
+                </div>
+            </div>
+
+            <button class="action-btn" style="grid-column:span 2;" onclick="showStatsModal()">View Full 52-Week Stats</button>
+        </div>
+
+        <!-- Activity Calendar -->
+        <div style="margin-top:24px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+                <h3 style="margin:0;">Activity Calendar</h3>
+                <div style="display:flex;gap:8px;font-size:12px;align-items:center;">
+                    <div style="width:12px;height:12px;border-radius:2px;background:#3b82f6;"></div><span style="color:var(--text-muted);">Gym</span>
+                    <div style="width:12px;height:12px;border-radius:2px;background:#10b981;"></div><span style="color:var(--text-muted);">Home</span>
+                    <div style="width:12px;height:12px;border-radius:2px;background:#f97316;"></div><span style="color:var(--text-muted);">Cardio</span>
+                </div>
+            </div>
+            <div id="activityCalendar" style="position:relative;"></div>
+            <div id="calendarPopover" style="display:none;position:absolute;background:#1e293b;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:#fff;z-index:100;pointer-events:none;max-width:200px;box-shadow:0 4px 16px rgba(0,0,0,0.5);"></div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div style="margin-top:16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="margin:0;">Recent Activity</h3>
+                <button class="action-btn" style="padding:6px 14px;font-size:12px;background:#475569;" onclick="showPage('quicklog')">+ Quick Log</button>
+            </div>
+            <div id="recentActivityList"></div>
+        </div>
+    </div>
+
+    <!-- CREATE PROGRAM PAGE -->
+    <div id="page-creator" class="page">
+        <h2>Custom Program Architect</h2>
+        <div style="margin-bottom:20px;display:flex;gap:15px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="newWorkoutTitle" placeholder="Program Title (e.g., Push Day)" style="flex:1;min-width:160px;">
+            <label style="font-weight:600;">Location:</label>
+            <select id="locationMode" onchange="resetBuilderList()">
+                <option value="gym">Commercial Gym</option>
+                <option value="home">Home Workout</option>
+            </select>
+        </div>
+        <div id="newExerciseList"></div>
+        <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="action-btn" style="background:#475569;" onclick="addExerciseRowWithSelect()">+ Add Exercise</button>
+            <button class="action-btn" style="background:#64748b;" onclick="addCustomExerciseRow()">+ Other Exercise</button>
+            <button class="action-btn" onclick="saveCustomWorkout()">Save to System</button>
+        </div>
+    </div>
+
+    <!-- MY PROGRAMS PAGE -->
+    <div id="page-selector" class="page">
+        <div style="background:linear-gradient(135deg,#e0f2fe 0%,#f0fdf4 100%);border-radius:16px;padding:20px;margin-bottom:25px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div>
+                <h3 style="color:#0284c7;margin:0 0 6px 0;font-size:18px;font-weight:700;">System Architect</h3>
+                <p style="color:#334155;font-size:14px;margin:0 0 12px 0;">Select any routine to modify and log your performance.</p>
+                <button class="action-btn" style="background:#0284c7;font-size:13px;padding:6px 14px;border-radius:20px;" onclick="showPage('creator')">Build Custom Now</button>
+            </div>
+        </div>
+
+        <h2 class="routines-section-title">Explore Pre-made Workouts</h2>
+        <div class="filter-tabs-wrapper">
+            <button class="filter-chip active-filter" id="filter-all" onclick="filterPremade('all')">Show All</button>
+            <button class="filter-chip" id="filter-gym" onclick="filterPremade('gym')">🏋️ Gym</button>
+            <button class="filter-chip" id="filter-home" onclick="filterPremade('home')">🏠 Home</button>
+            <button class="filter-chip" id="filter-cardio" onclick="filterPremade('cardio')">🏃 Cardio</button>
+        </div>
+        <div id="premadeButtonsGrid" class="routines-grid"></div>
+        <div id="premadeToggleContainer" style="display:flex;justify-content:center;margin-top:20px;"></div>
+
+        <h2 class="routines-section-title" style="margin-top:35px;">My Personal Routines</h2>
+        <div id="savedProgramsGrid" class="routines-grid"></div>
+    </div>
+
+    <!-- ACTIVE TRACKER PAGE -->
+    <div id="page-tracker" class="page">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+            <h2 id="trackerWorkoutTitle" style="margin:0;">Active Workout Session</h2>
+            <button class="action-btn" style="background:#475569;padding:8px 16px;" onclick="showPage('selector')">← Cancel</button>
+        </div>
+
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;display:flex;gap:15px;align-items:center;flex-wrap:wrap;">
+            <label style="font-weight:600;color:#fff;">Target Log Day:</label>
+            <select id="logTargetDay" style="flex:1;">
+                <option value="Mon">Monday</option>
+                <option value="Tue">Tuesday</option>
+                <option value="Wed">Wednesday</option>
+                <option value="Thu">Thursday</option>
+                <option value="Fri">Friday</option>
+                <option value="Sat">Saturday</option>
+                <option value="Sun">Sunday</option>
+            </select>
+        </div>
+
+        <!-- Rest Timer Bar -->
+        <div class="rest-timer-bar" id="restTimerBar">
+            <div>
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px;">Rest Timer</div>
+                <div class="rest-timer-display" id="restTimerDisplay">1:30</div>
+            </div>
+            <div class="rest-presets">
+                <button class="rest-preset-btn" onclick="startRest(30)">30s</button>
+                <button class="rest-preset-btn active" onclick="startRest(60)">60s</button>
+                <button class="rest-preset-btn" onclick="startRest(90)">90s</button>
+                <button class="rest-preset-btn" onclick="startRest(120)">2m</button>
+                <button class="rest-preset-btn" onclick="startRest(180)">3m</button>
+            </div>
+            <button class="rest-preset-btn" onclick="stopRestTimer()" style="background:#ef4444;color:#fff;">✕ Stop</button>
+        </div>
+
+        <div id="activeWorkoutExercisesContainer"></div>
+
+        <div style="margin-top:25px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="action-btn" style="background:#f97316;flex:1;padding:14px;font-size:14px;" onclick="showRestTimerBar()">
+                ⏱ Start Rest
+            </button>
+            <button class="action-btn" style="background:var(--success);flex:2;padding:14px;font-size:15px;" onclick="commitCompletedWorkoutSession()">
+                ✓ Log Workout as Completed
+            </button>
+            <div id="loading-spinner" style="display:none; color: var(--accent); font-weight: bold; margin-top: 10px;">
+        Saving to cloud... ⏳
+    </div>
+        </div>
+    </div>
+    <!-- EXERCISE GUIDE PAGE -->
+    <div id="page-guide" class="page">
+        <h2>Exercise Guide</h2>
+        <p style="color:var(--text-muted);margin-top:-10px;margin-bottom:20px;font-size:14px;">Select an exercise to see correct form, muscles targeted, and a 3D animation of the movement.</p>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;">
+            <select id="guideCategorySelect" onchange="populateGuideExercises()" style="flex:1;min-width:150px;">
+                <option value="">— Select Muscle Group —</option>
+            </select>
+            <select id="guideExerciseSelect" onchange="loadExerciseGuide()" style="flex:2;min-width:200px;">
+                <option value="">— Select Exercise —</option>
+            </select>
+            <select id="guideLocationMode" onchange="buildGuideCategoryList()" style="min-width:130px;">
+                <option value="gym">Gym</option>
+                <option value="home">Home</option>
+            </select>
+        </div>
+
+        <div id="guideContent" style="display:none;">
+            <!-- Exercise Info Card -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;">
+                    <h3 id="guideExName" style="margin-bottom:8px;font-size:18px;color:#fff;"></h3>
+                    <p style="font-size:12px;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin:0 0 4px 0;">Primary Muscles</p>
+                    <p id="guidePrimary" style="color:var(--accent);font-weight:600;margin:0 0 12px 0;font-size:14px;"></p>
+                    <p style="font-size:12px;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin:0 0 4px 0;">Equipment</p>
+                    <p id="guideEquipment" style="color:var(--text-main);margin:0 0 12px 0;font-size:14px;"></p>
+                    <p style="font-size:12px;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin:0 0 4px 0;">Difficulty</p>
+                    <div id="guideDifficulty" style="margin:0;"></div>
+                </div>
+                <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;">
+                    <p style="font-size:12px;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin:0 0 8px 0;">How to Perform</p>
+                    <ol id="guideSteps" style="margin:0;padding-left:18px;color:var(--text-main);font-size:13px;line-height:1.8;"></ol>
+                </div>
+            </div>
+
+            <!-- 3D Animation Panel -->
+            <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;font-size:16px;">3D Form Animation</h3>
+                    <div style="display:flex;gap:8px;">
+                        <button class="action-btn" style="padding:6px 14px;font-size:12px;background:#475569;" onclick="toggleGuideAnimation()">
+                            <span id="animToggleLabel">⏸ Pause</span>
+                        </button>
+                        <button class="action-btn" style="padding:6px 14px;font-size:12px;background:#475569;" onclick="resetGuideCamera()">↺ Reset View</button>
+                    </div>
+                </div>
+                <div id="guide3DContainer" style="width:100%;height:380px;background:#060d1a;border-radius:8px;border:1px solid var(--border);position:relative;overflow:hidden;cursor:grab;"></div>
+                <div id="guidePhaseLabel" style="text-align:center;margin-top:10px;font-size:13px;color:var(--text-muted);font-weight:600;letter-spacing:0.5px;"></div>
+            </div>
+
+            <!-- Tips -->
+            <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:12px;padding:16px;">
+                <p style="font-size:12px;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 8px 0;">⚡ Pro Tips</p>
+                <ul id="guideTips" style="margin:0;padding-left:18px;color:var(--text-main);font-size:13px;line-height:1.9;"></ul>
+            </div>
+        </div>
+
+        <div id="guidePlaceholder" style="text-align:center;padding:60px 20px;color:var(--text-muted);">
+            <div style="font-size:48px;margin-bottom:16px;">🏋️</div>
+            <p style="font-size:16px;font-weight:600;">Select a muscle group and exercise above</p>
+            <p style="font-size:13px;margin-top:4px;">You'll see step-by-step instructions and a 3D movement animation.</p>
+        </div>
+    </div>
+
+    <!-- QUICK LOG PAGE -->
+    <div id="page-quicklog" class="page">
+        <h2>⚡ Quick Log</h2>
+        <p style="color:var(--text-muted);margin-top:-10px;margin-bottom:20px;font-size:14px;">Log any exercise in seconds — no program setup needed.</p>
+
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Muscle Group</label>
+                    <select id="qlCategory" onchange="populateQLExercises()" style="width:100%;box-sizing:border-box;">
+                        <option value="">— Select —</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Exercise</label>
+                    <select id="qlExercise" style="width:100%;box-sizing:border-box;">
+                        <option value="">— Select exercise —</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <div style="height:1px;flex:1;background:var(--border);"></div>
+                <span style="font-size:11px;color:var(--text-muted);font-weight:600;">OR TYPE CUSTOM</span>
+                <div style="height:1px;flex:1;background:var(--border);"></div>
+            </div>
+            <input type="text" id="qlCustomName" placeholder="Custom exercise name…" style="width:100%;box-sizing:border-box;margin-bottom:12px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px;">
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Sets</label>
+                    <input type="number" id="qlSets" value="3" min="1" style="width:100%;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Reps</label>
+                    <input type="number" id="qlReps" value="10" min="0" style="width:100%;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Weight</label>
+                    <input type="number" id="qlWeight" value="0" min="0" step="0.5" style="width:100%;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Day</label>
+                    <select id="qlDay" style="width:100%;box-sizing:border-box;">
+                        <option value="Mon">Mon</option>
+                        <option value="Tue">Tue</option>
+                        <option value="Wed">Wed</option>
+                        <option value="Thu">Thu</option>
+                        <option value="Fri">Fri</option>
+                        <option value="Sat">Sat</option>
+                        <option value="Sun">Sun</option>
+                    </select>
+                </div>
+            </div>
+            <button class="action-btn" onclick="quickLogAddExercise()" style="width:100%;padding:12px;">+ Add to Session</button>
+        </div>
+
+        <div id="qlSessionList" style="margin-bottom:16px;"></div>
+
+        <div id="qlActions" style="display:none;gap:10px;flex-wrap:wrap;">
+            <button class="action-btn" style="background:#475569;flex:1;" onclick="clearQLSession()">✕ Clear</button>
+            <button class="action-btn" style="background:var(--success);flex:2;padding:14px;" onclick="commitQLSession()">✓ Log This Session</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- 52-WEEK STATS MODAL — Enhanced with tooltips, trend line, period toggle -->
+<div id="statsModal" class="modal-overlay">
+    <div class="modal-box" style="max-width:860px;">
+        <button class="modal-close" onclick="closeStatsModal()">✕ Close</button>
+        <h2 style="margin-bottom:16px;">52-Week Performance Analysis</h2>
+
+        <!-- Period toggle: Volume vs Frequency -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+            <button class="stats-period-btn active" id="periodVolume" onclick="setStatsPeriod('volume')">📊 Volume</button>
+            <button class="stats-period-btn" id="periodFrequency" onclick="setStatsPeriod('frequency')">📅 Frequency</button>
+            <div style="flex:1;"></div>
+            <div id="statsTooltipBox" style="font-size:12px;color:var(--text-muted);padding:6px 12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;display:none;"></div>
+        </div>
+
+        <div style="position:relative;">
+            <canvas id="yearlyChart" height="320" style="cursor:crosshair;"></canvas>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:10px;font-size:12px;color:var(--text-muted);align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:5px;"><div style="width:12px;height:12px;border-radius:2px;background:#3b82f6;"></div> Weekly total</div>
+            <div style="display:flex;align-items:center;gap:5px;"><div style="width:24px;height:2px;background:#f97316;"></div> 4-week avg trend</div>
+        </div>
+
+        <!-- Strength Progression: e1RM -->
+        <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:20px;">
+            <h3 style="margin:0 0 12px;">Top Lift — Estimated 1RM Progression</h3>
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+                <select id="e1rmExerciseSelect" onchange="drawE1RMChart()" style="flex:1;min-width:200px;">
+                    <option value="">— Select a key lift —</option>
+                    <option value="Flat Barbell Bench Press">Bench Press</option>
+                    <option value="Barbell Back Squats">Back Squat</option>
+                    <option value="Deadlifts">Deadlift</option>
+                    <option value="Overhead Barbell Press">Overhead Press</option>
+                    <option value="Barbell Rows">Barbell Row</option>
+                    <option value="Romanian Deadlifts (RDLs)">Romanian Deadlift</option>
+                    <option value="Pull-Ups / Chin-Ups">Pull-Up / Chin-Up</option>
+                </select>
+            </div>
+            <div style="position:relative;">
+                <canvas id="e1rmChart" height="220" style="cursor:crosshair;"></canvas>
+            </div>
+            <div id="e1rmTooltipBox" style="font-size:12px;color:var(--text-muted);margin-top:8px;min-height:20px;text-align:center;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- PROGRESS TAB MODAL (exercise-specific progress chart) -->
+<div id="progressModal" class="modal-overlay">
+    <div class="modal-box" style="max-width:800px;">
+        <button class="modal-close" onclick="document.getElementById('progressModal').classList.remove('open')">✕ Close</button>
+        <h2 style="margin-bottom:16px;">Exercise Progress Tracker</h2>
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+            <select id="progressCatSelect" onchange="populateProgressExercises()" style="flex:1;min-width:150px;">
+                <option value="">— Muscle Group —</option>
+            </select>
+            <select id="progressExSelect" onchange="drawProgressChart()" style="flex:2;min-width:200px;">
+                <option value="">— Exercise —</option>
+            </select>
+        </div>
+        <div style="position:relative;">
+            <canvas id="progressChart" height="260" style="cursor:crosshair;"></canvas>
+        </div>
+        <div id="progressTooltipBox" style="font-size:12px;color:var(--text-muted);margin-top:8px;min-height:20px;text-align:center;"></div>
+        <div style="margin-top:16px;display:flex;gap:10px;font-size:12px;color:var(--text-muted);align-items:center;">
+            <div style="display:flex;align-items:center;gap:5px;"><div style="width:12px;height:12px;border-radius:2px;background:#10b981;"></div> Best set weight × reps</div>
+            <div style="display:flex;align-items:center;gap:5px;"><div style="width:24px;height:2px;background:#f97316;"></div> 4-week avg</div>
+        </div>
+    </div>
+</div>
+
+<script src="app.js">  
+</script>
+
+    <script>
+    // ─── SUPABASE AUTH STATE LISTENER ────────────────────────────────────────────
+    // Runs after app.js is loaded — keeps UI in sync with auth state
+    window.addEventListener('load', function() {
+        if (typeof _supabase !== 'undefined' && _supabase) {
+            _supabase.auth.getSession().then(({ data: { session } }) => {
+                if (typeof updateAuthUI === 'function') updateAuthUI(session?.user || null);
+            });
+            _supabase.auth.onAuthStateChange((_event, session) => {
+                if (typeof updateAuthUI === 'function') updateAuthUI(session?.user || null);
+                // Re-sync data on sign-in
+                if (session?.user && typeof updateDashboard === 'function') {
+                    updateDashboard();
+                }
+            });
+        }
+    });
+    </script>
+</body>
+</html>
