@@ -1,8 +1,8 @@
  // ─── STATE ───────────────────────────────────────────────────────────────
  // Add this at the very top of your app.js
 // Supabase client — set your credentials below or via environment
-const SUPABASE_URL  = window.__SUPABASE_URL  || 'YOUR_SUPABASE_URL';
-const SUPABASE_KEY  = window.__SUPABASE_KEY  || 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL  = window.__SUPABASE_URL  || 'https://itmiwjjctyztwcegntji.supabase.co/rest/v1/';
+const SUPABASE_KEY  = window.__SUPABASE_KEY  || 'sb_publishable_3pehwCn9QXv1paChE9q2nw_VS3ijAZx';
 const _supabase = (typeof window !== 'undefined' && window.supabase)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
     : null; // running without Supabase — localStorage fallback active
